@@ -1,6 +1,6 @@
 # node-vara
 Communicate via radio in the style of node net, using a
-(VARA)[https://rosmodem.wordpress.com/]
+[VARA](https://rosmodem.wordpress.com/)
 FM or HF modem.
 ```js
 const VARA = require('@jmkristian/node-vara');
