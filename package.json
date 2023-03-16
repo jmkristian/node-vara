@@ -1,0 +1,30 @@
+{
+  "name": "@jmkristian/node-vara",
+  "version": "0.1.0",
+  "description": "Communicate via radio in the style of node net, using a VARA FM or VARA HF modem.",
+  "main": "index.js",
+  "engines": {
+    "node": ">=8.17.0"
+  },
+  "dependencies": {
+    "bunyan": "^1.8.15"
+  },
+  "scripts": {
+    "test": "echo No test specified"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jmkristian/node-vara.git"
+  },
+  "keywords": [
+    "VARA",
+    "radio",
+    "modem"
+  ],
+  "author": "John Kristian",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/jmkristian/node-vara/issues"
+  },
+  "homepage": "https://github.com/jmkristian/node-vara#readme"
+}
