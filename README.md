@@ -1,5 +1,7 @@
 # node-vara
-Communicate via radio in the style of node net, using a
+Communicate via radio in the style of
+[node net](https://nodejs.org/docs/latest-v8.x/api/net.html),
+using a
 [VARA](https://rosmodem.wordpress.com/)
 FM or HF modem.
 ```js
@@ -15,14 +17,14 @@ var server = new VARA.Server ({
     },
     function onConnection(connection) { // handles 'connection' events
         console.log('connection'
-                    + ' from ' + connection.theirCall
-                    + ' to ' + connection.myCall);
+                    + ' from ' + connection.theirCallSign
+                    + ' to ' + connection.myCallSign);
         connection.write(...); // transmit data
         connection.pipe(...); // receive data
     });
 
 server.listen({
-        callTo: ['A1CALL-1', 'B2CALL-10']  // This server's call signs.
+        myCallSigns: ['A1CALL-1', 'B2CALL-10']  // This server's call signs.
     },
     function onListening(info) { // called when the server begins listening
         console.log('VARA listening ' + (info || ''));

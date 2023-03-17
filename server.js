@@ -180,17 +180,20 @@ class Server extends EventEmitter {
         }
     }
     
-    /** May be called repeatedly with different call signs. */
     listen(options, callback) {
         this.log.trace('listen(%o)', options);
-        if (callback) {
-            this.on('listening', callback);
-        }
-        if (this.options) {
-            this.myCall = this.options.myCallSigns.join(' ');
-        }
-        if (this.myCall) {
-            this.connectVARA();
+        if (!options) {
+            this.emit('error', new Error('listen called without options'));
+        } else {
+            this.myCallSigns = options.myCallSigns ? options.myCallSigns.join(' ') : undefined;
+            if (!this.myCallSigns) { // possibly ''
+                this.emit('error', new Error('listen called without myCallSigns'));
+            } else {
+                if (callback) {
+                    this.on('listening', callback);
+                }
+                this.connectVARA();
+            }
         }
     }
 
@@ -323,10 +326,10 @@ class Server extends EventEmitter {
                 that.log.warn(err, `socket`);
             }
             that.toVARA('VERSION', 'VERSION');
-            that.toVARA(`MYCALL ${that.myCall}`, 'OK');
+            that.toVARA(`MYCALL ${that.myCallSigns}`, 'OK');
             // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
             that.toVARA('LISTEN ON', 'OK');
-            that.emit('listening', that.myCall);
+            that.emit('listening', {myCallSigns: that.myCallSigns.split(/\s+/)});
         });
     }
 
@@ -388,8 +391,8 @@ class Server extends EventEmitter {
                 }
             }
         });
-        this.connection.theirCall = parts[1];
-        this.connection.myCall = parts[2];
+        this.connection.theirCallSign = parts[1];
+        this.connection.myCallSign = parts[2];
         this.dataReceiver
             = new VARAReceiver(this.options, this.connection);
         this.dataSocket.pipe(this.dataReceiver);
