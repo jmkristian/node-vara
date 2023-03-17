@@ -5,10 +5,11 @@ const EventEmitter = require('events');
 const Net = require('net');
 const Stream = require('stream');
 
+const DefaultLogID = 'VARA';
 const KByte = 1 << 10;
 
 const LogNothing = Bunyan.createLogger({
-    name: 'stub',
+    name: 'VARA',
     level: Bunyan.FATAL + 100,
 });
 
@@ -42,10 +43,9 @@ function getDataSummary(data) {
 /** Pipes data from a Readable stream to a fromVARA method. */
 class VARAReceiver extends Stream.Writable {
 
-    constructor(options, flavor, target) {
+    constructor(options, target) {
         super(); // The defaults are good.
         this.log = getLogger(options, this);
-        this.flavor = flavor;
         this.target = target;
     }
 
@@ -57,8 +57,7 @@ class VARAReceiver extends Stream.Writable {
                 throw 'Lost received data ' + getDataSummary(chunk);
             } else {
                 if (this.log.trace()) {
-                    this.log.trace('VARA%s< %s',
-                                   this.flavor, getDataSummary(chunk));
+                    this.log.trace('< %s', getDataSummary(chunk));
                 }
                 this.target.fromVARA(chunk);
             }
@@ -81,7 +80,7 @@ class Connection extends Stream.Duplex {
        disconnected.
     */
 
-    constructor(options, flavor, dataSocket) {
+    constructor(options, dataSocket) {
         super({
             allowHalfOpen: true,
             emitClose: false, // emitClose: true doesn't always emit close.
@@ -91,7 +90,6 @@ class Connection extends Stream.Duplex {
             writableHighWaterMark: 4 * KByte,
         });
         this.log = getLogger(options, this);
-        this.flavor = flavor;
         this.dataSocket = dataSocket;
         this.bufferLength = 0;
         var that = this;
@@ -112,8 +110,7 @@ class Connection extends Stream.Duplex {
             callback();
         } else {
             if (this.log.debug()) {
-                this.log.debug('VARA%s data> %s',
-                               this.flavor, getDataSummary(data));
+                this.log.debug('data> %s', getDataSummary(data));
             }
             this.bufferLength += data.length;
             this.dataSocket.write(data, encoding, callback);
@@ -149,8 +146,7 @@ class Connection extends Stream.Duplex {
 
     fromVARA(buffer) {
         if (this.log.debug()) {
-            this.log.debug('VARA%s data< %s',
-                           this.flavor, getDataSummary(buffer));
+            this.log.debug('data< %s', getDataSummary(buffer));
         }
         if (this.receiveBufferIsFull) {
             this.emit('error',
@@ -171,16 +167,14 @@ class Connection extends Stream.Duplex {
 */
 class Server extends EventEmitter {
 
-    /** Typical flavors are 'FM' and 'HF'. */
-    constructor(options, onConnection, flavor) {
+    constructor(options, onConnection) {
         super();
-        this.options = options;
-        this.flavor = flavor ? ` ${flavor}` : '';
         this.log = getLogger(options, this);
-        if (!this.options) {
-            this.emit('error', new Error(`VARA${this.flavor} missing options`));
+        if (!options) {
+            this.emit('error', new Error(`missing options`));
             this.close();
         } else {
+            this.options = options;
             this.outputBuffer = [];
             if (onConnection) this.on('connection', onConnection);
         }
@@ -201,7 +195,7 @@ class Server extends EventEmitter {
     }
 
     close(afterClose) {
-        this.log.debug(`VARA${this.flavor} close()`);
+        this.log.debug(`close()`);
         this.iAmClosed = true;
         this.socket.destroy();
         if (afterClose) afterClose();
@@ -219,7 +213,7 @@ class Server extends EventEmitter {
         if (this.outputBuffer.length) {
             var line = this.outputBuffer.shift();
             var waitFor = this.outputBuffer.shift();
-            this.log.debug(`VARA${this.flavor}> ${line}`);
+            this.log.debug(`> ${line}`);
             this.socket.write(line + '\r');
             this.waitingFor = waitFor && waitFor.toLowerCase();
         }
@@ -241,10 +235,10 @@ class Server extends EventEmitter {
             case 'iamalive':
             case 'ptt':
                 // boring
-                this.log.trace(`VARA${this.flavor}< ${line}`);
+                this.log.trace(`< ${line}`);
                 break;
             default:
-                this.log.debug(`VARA${this.flavor}< ${line}`);
+                this.log.debug(`< ${line}`);
             }
             if (this.waitingFor && this.waitingFor == part0) {
                 this.waitingFor = null;
@@ -281,11 +275,11 @@ class Server extends EventEmitter {
                 }
                 break;
             case 'missing':
-                this.log.error(`VARA${this.flavor}< ${line}`);
+                this.log.error(`< ${line}`);
                 this.close();
                 break;
             case 'wrong':
-                this.log.warn(`VARA${this.flavor}< ${line}`);
+                this.log.warn(`< ${line}`);
                 this.waitingFor = null;
                 this.flushToVARA();
                 break;
@@ -296,14 +290,14 @@ class Server extends EventEmitter {
     }
 
     connectVARA() {
-        this.log.debug(`VARA${this.flavor} connectVARA`);
+        this.log.debug(`connectVARA`);
         if (this.socket) {
             this.socket.destroy();
         }
         this.socket = new Net.Socket();
         var that = this;
         this.socket.on('error', function(err) {
-            that.log.trace('VARA%s socket %s', that.flavor, err || '');
+            that.log.trace('socket %s', err || '');
             that.emit('error', err);
             if (err &&
                 (`${err}`.includes('ECONNREFUSED') ||
@@ -313,7 +307,7 @@ class Server extends EventEmitter {
         });
         // VARA might close the socket. The documentation doesn't say.
         this.socket.on('close', function(info) {
-            that.log.debug('VARA%s socket close %s', that.flavor, info || '');
+            that.log.debug('socket close %s', info || '');
             if (!that.iAmClosed) {
                 that.connectVARA();
             }
@@ -323,10 +317,10 @@ class Server extends EventEmitter {
                 that.log.debug('socket %s %s', event, info || '');
             });
         });
-        this.socket.pipe(new VARAReceiver(this.options, this.flavor, this));
+        this.socket.pipe(new VARAReceiver(this.options, this));
         this.socket.connect(this.options, function(err) {
             if (err) {
-                that.log.warn(err, `VARA${that.flavor} socket`);
+                that.log.warn(err, `socket`);
             }
             that.toVARA('VERSION', 'VERSION');
             that.toVARA(`MYCALL ${that.myCall}`, 'OK');
@@ -372,7 +366,7 @@ class Server extends EventEmitter {
         }
         this.connectDataSocket(); // if necessary
         this.connection =
-            new Connection(this.options, this.flavor, this.dataSocket);
+            new Connection(this.options, this.dataSocket);
         var that = this;
         ['end', 'close'].forEach(function(event) {
             that.connection.on(event, function(err) {
@@ -397,7 +391,7 @@ class Server extends EventEmitter {
         this.connection.theirCall = parts[1];
         this.connection.myCall = parts[2];
         this.dataReceiver
-            = new VARAReceiver(this.options, this.flavor, this.connection);
+            = new VARAReceiver(this.options, this.connection);
         this.dataSocket.pipe(this.dataReceiver);
         this.isConnected = true;
         this.emit('connection', this.connection);

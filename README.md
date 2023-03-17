@@ -10,7 +10,7 @@ var server = new VARA.Server ({
         host: 'vara-fm-server-host', // default: localhost
         port: 8300, // default: 8300
         dataPort: 8301, // default: port + 1
-        logger: Bunyan.createLogger({name: "myapp"}), /* default: no logging
+        logger: Bunyan.createLogger({name: 'VARA'}), /* default: no logging
             An object compatible with the Bunyan logger interface, or null. */
     },
     function onConnection(connection) { // handles 'connection' events
@@ -19,8 +19,7 @@ var server = new VARA.Server ({
                     + ' to ' + connection.myCall);
         connection.write(...); // transmit data
         connection.pipe(...); // receive data
-    },
-    VARA.FM); // identifies the server in logger messages
+    });
 
 server.listen({
         callTo: ['A1CALL-1', 'B2CALL-10']  // This server's call signs.
