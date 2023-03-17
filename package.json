@@ -1,6 +1,6 @@
 {
   "name": "@jmkristian/node-vara",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Communicate via radio in the style of node net, using a VARA FM or VARA HF modem.",
   "main": "index.js",
   "engines": {
