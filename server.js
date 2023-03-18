@@ -182,26 +182,30 @@ class Server extends EventEmitter {
     
     listen(options, callback) {
         this.log.trace('listen(%o)', options);
-        if (!options) {
-            this.emit('error', new Error('listen called without options'));
-        } else {
-            this.myCallSigns = options.myCallSigns ? options.myCallSigns.join(' ') : undefined;
-            if (!this.myCallSigns) { // possibly ''
-                this.emit('error', new Error('listen called without myCallSigns'));
-            } else {
-                if (callback) {
-                    this.on('listening', callback);
-                }
-                this.connectVARA();
-            }
+        if (!(options && options.myCallSigns && options.myCallSigns.length > 0)) {
+            throw new Error('options.myCallSigns is absent or empty.');
         }
+        if (this.iAmListening) {
+            throw newError('Server is already listening.', 'ERR_SERVER_ALREADY_LISTEN');
+        }
+        this.iAmListening = true;
+        this.myCallSigns = options.myCallSigns.join(' ');
+        if (callback) {
+            this.on('listening', callback);
+        }
+        this.connectVARA();
     }
 
-    close(afterClose) {
-        this.log.debug(`close()`);
-        this.iAmClosed = true;
-        this.socket.destroy();
-        if (afterClose) afterClose();
+    close(callback) {
+        this.log.trace('close()');
+        if (!this.iAmListening) {
+            if (callback) callback(new Error('Server is already closed'));
+        } else {
+            this.iAmListening = false;
+            this.socket.destroy();
+            this.emit('close');
+            if (callback) callback();
+        }
     }
 
     toVARA(line, waitFor) {
@@ -311,7 +315,7 @@ class Server extends EventEmitter {
         // VARA might close the socket. The documentation doesn't say.
         this.socket.on('close', function(info) {
             that.log.debug('socket close %s', info || '');
-            if (!that.iAmClosed) {
+            if (that.iAmListening) {
                 that.connectVARA();
             }
         });
@@ -329,7 +333,7 @@ class Server extends EventEmitter {
             that.toVARA(`MYCALL ${that.myCallSigns}`, 'OK');
             // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
             that.toVARA('LISTEN ON', 'OK');
-            that.emit('listening', {myCallSigns: that.myCallSigns.split(/\s+/)});
+            that.emit('listening', {myCallSigns: that.myCallSigns.split('/\s+/')});
         });
     }
 
