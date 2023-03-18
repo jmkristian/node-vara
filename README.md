@@ -1,6 +1,6 @@
 # node-vara
 Communicate via radio in the style of
-[node net](https://nodejs.org/docs/latest-v8.x/api/net.html),
+[node Net](https://nodejs.org/docs/latest-v8.x/api/net.html),
 using a
 [VARA](https://rosmodem.wordpress.com/)
 FM or HF modem.
