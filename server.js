@@ -23,6 +23,12 @@ function getLogger(options, that) {
     }
 }
 
+function newError(message, code) {
+    const err = new Error(message);
+    err.code = code;
+    return err;
+}
+
 function getDataSummary(data) {
     if (Buffer.isBuffer(data)) {
         if (data.length <= 32) {
@@ -170,14 +176,9 @@ class Server extends EventEmitter {
     constructor(options, onConnection) {
         super();
         this.log = getLogger(options, this);
-        if (!options) {
-            this.emit('error', new Error(`missing options`));
-            this.close();
-        } else {
-            this.options = options;
-            this.outputBuffer = [];
-            if (onConnection) this.on('connection', onConnection);
-        }
+        this.options = options || {};
+        this.outputBuffer = [];
+        if (onConnection) this.on('connection', onConnection);
     }
     
     listen(options, callback) {
@@ -209,6 +210,7 @@ class Server extends EventEmitter {
     }
 
     toVARA(line, waitFor) {
+        this.log.trace('toVARA(%s, %s)', line, waitFor);
         this.outputBuffer.push(line);
         this.outputBuffer.push(waitFor);
         if (this.waitingFor == null) {
@@ -217,6 +219,7 @@ class Server extends EventEmitter {
     }
 
     flushToVARA() {
+        this.log.trace('flushToVara');
         if (this.outputBuffer.length) {
             var line = this.outputBuffer.shift();
             var waitFor = this.outputBuffer.shift();
