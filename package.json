@@ -9,8 +9,11 @@
   "dependencies": {
     "bunyan": "^1.8.15"
   },
+  "devDependencies": {
+    "jasmine": "^4.6.0"
+  },
   "scripts": {
-    "test": "echo No test specified"
+    "test": "jasmine"
   },
   "repository": {
     "type": "git",
