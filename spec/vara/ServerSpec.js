@@ -96,17 +96,17 @@ describe('Server', function() {
         }
     });
 
-    it('should require myCallSigns', function() {
+    it('should require host', function() {
         try {
             server.listen({});
-            fail('no options.myCallSigns');
+            fail('no options.host');
         } catch(err) {
         }
     });
 
     it('should emit listening', function() {
         var listening = false;
-        server.listen({myCallSigns: ['N0CALL']}, function() {
+        server.listen({host: 'N0CALL'}, function() {
             listening = true;
         });
         expect(listening).toBe(true);
@@ -115,9 +115,7 @@ describe('Server', function() {
 
     it('should connect to VARA TNC', function() {
         spyOn(mockSocket.prototype, 'connect');
-        server.listen({
-            myCallSigns: ['N0CALL'],
-        });
+        server.listen({host: ['N0CALL']});
         expect(aSocket.on).toHaveBeenCalled();
         expect(aSocket.pipe).toHaveBeenCalledTimes(1);
         expect(aSocket.connect).toHaveBeenCalledWith(
@@ -132,7 +130,7 @@ describe('Server', function() {
     it('should disconnect from VARA TNC', function() {
         var closed = false;
         spyOn(mockSocket.prototype, 'destroy');
-        server.listen({myCallSigns: ['N0CALL']});
+        server.listen({host: 'N0CALL'});
         server.on('close', function(err) {
             closed = true;
         });
@@ -143,9 +141,9 @@ describe('Server', function() {
 
     it('should not listen twice', function() {
         var actual = null;
-        server.listen({myCallSigns: ['N0CALL']});
+        server.listen({host: ['N0CALL']});
         try {
-            server.listen({myCallSigns: ['N0CALL']});
+            server.listen({host: ['N0CALL']});
             fail();
         } catch(err) {
             actual = err;

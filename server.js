@@ -184,13 +184,16 @@ class Server extends EventEmitter {
     
     listen(options, callback) {
         this.log.trace('listen(%o)', options);
-        if (!(options && options.myCallSigns && options.myCallSigns.length > 0)) {
-            throw new Error('no options.myCallSigns');
+        if (!(options && options.host && (!Array.isArray(options.host) || options.host.length > 0))) {
+            throw new Error('no options.host');
         }
         if (this.listening) {
             throw newError('Server is already listening.', 'ERR_SERVER_ALREADY_LISTEN');
         }
-        this.myCallSigns = options.myCallSigns.join(' ');
+        if (options.port != null) {
+            this.log.warn("A VARA TNC doesn't have ports");
+        }
+        this.myCallSigns = Array.isArray(options.host) ? options.host.join(' ') : options.host + '';
         this.listening = true;
         if (callback) {
             this.on('listening', callback);
@@ -337,7 +340,7 @@ class Server extends EventEmitter {
             that.toVARA(`MYCALL ${that.myCallSigns}`, 'OK');
             // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
             that.toVARA('LISTEN ON', 'OK');
-            that.emit('listening', {myCallSigns: that.myCallSigns.split('/\s+/')});
+            that.emit('listening', {host: that.myCallSigns.split('/\s+/')});
         });
     }
 

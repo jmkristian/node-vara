@@ -24,7 +24,7 @@ var server = new VARA.Server ({
     });
 
 server.listen({
-        myCallSigns: ['A1CALL-1', 'B2CALL-10']  // This server's call signs.
+        host: ['A1CALL-1', 'B2CALL-10']  // This server's call signs.
     },
     function onListening(info) { // called when the server begins listening
         console.log('VARA listening ' + (info || ''));
