@@ -167,16 +167,17 @@ class Connection extends Stream.Duplex {
 
 /** Similar to net.Server, but for VARA connections.
     Each 'connection' event provides a Duplex stream for exchanging data via
-    one VARA connection. The remote call sign is connection.theirCall. To
-    disconnect, call connection.end() or destroy(). The connection emits a
-    'close' event when VARA is disconnected.
+    one VARA connection. The remote call sign is connection.remoteAddress.
+    To disconnect, call connection.end() or destroy(). The connection emits
+    a 'close' event when VARA is disconnected.
 */
 class Server extends EventEmitter {
 
     constructor(options, onConnection) {
         super();
+        if (!(options && options.port)) throw new Error('no options.port');
         this.log = getLogger(options, this);
-        this.options = options || {};
+        this.options = options;
         this.outputBuffer = [];
         if (onConnection) this.on('connection', onConnection);
     }
@@ -184,13 +185,13 @@ class Server extends EventEmitter {
     listen(options, callback) {
         this.log.trace('listen(%o)', options);
         if (!(options && options.myCallSigns && options.myCallSigns.length > 0)) {
-            throw new Error('options.myCallSigns is absent or empty.');
+            throw new Error('no options.myCallSigns');
         }
-        if (this.iAmListening) {
+        if (this.listening) {
             throw newError('Server is already listening.', 'ERR_SERVER_ALREADY_LISTEN');
         }
-        this.iAmListening = true;
         this.myCallSigns = options.myCallSigns.join(' ');
+        this.listening = true;
         if (callback) {
             this.on('listening', callback);
         }
@@ -199,10 +200,10 @@ class Server extends EventEmitter {
 
     close(callback) {
         this.log.trace('close()');
-        if (!this.iAmListening) {
+        if (!this.listening) {
             if (callback) callback(new Error('Server is already closed'));
         } else {
-            this.iAmListening = false;
+            this.listening = false;
             this.socket.destroy();
             this.emit('close');
             if (callback) callback();
@@ -318,7 +319,7 @@ class Server extends EventEmitter {
         // VARA might close the socket. The documentation doesn't say.
         this.socket.on('close', function(info) {
             that.log.debug('socket close %s', info || '');
-            if (that.iAmListening) {
+            if (that.listening) {
                 that.connectVARA();
             }
         });
@@ -398,10 +399,9 @@ class Server extends EventEmitter {
                 }
             }
         });
-        this.connection.theirCallSign = parts[1];
-        this.connection.myCallSign = parts[2];
-        this.dataReceiver
-            = new VARAReceiver(this.options, this.connection);
+        this.connection.remoteAddress = parts[1];
+        this.connection.localAddress = parts[2];
+        this.dataReceiver = new VARAReceiver(this.options, this.connection);
         this.dataSocket.pipe(this.dataReceiver);
         this.isConnected = true;
         this.emit('connection', this.connection);

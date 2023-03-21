@@ -15,10 +15,10 @@ var server = new VARA.Server ({
         logger: Bunyan.createLogger({name: 'VARA'}), /* default: no logging
             An object compatible with the Bunyan logger interface, or null. */
     },
-    function onConnection(connection) { // handles 'connection' events
+    function onConnection(connection) {
         console.log('connection'
-                    + ' from ' + connection.theirCallSign
-                    + ' to ' + connection.myCallSign);
+                    + ' from ' + connection.remoteAddress
+                    + ' to ' + connection.localAddress);
         connection.write(...); // transmit data
         connection.pipe(...); // receive data
     });

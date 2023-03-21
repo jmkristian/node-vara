@@ -82,10 +82,24 @@ describe('Server', function() {
         });
     });
 
+    it('should require TNC port', function() {
+        new VARA.Server({port: serverOptions.port});
+        try {
+            new VARA.Server();
+            fail('no options');
+        } catch(err) {
+        }
+        try {
+            new VARA.Server({host: serverOptions.host});
+            fail('no options.port');
+        } catch(err) {
+        }
+    });
+
     it('should require myCallSigns', function() {
         try {
             server.listen({});
-            fail();
+            fail('no options.myCallSigns');
         } catch(err) {
         }
     });
@@ -96,6 +110,7 @@ describe('Server', function() {
             listening = true;
         });
         expect(listening).toBe(true);
+        expect(server.listening).toBe(true);
     });
 
     it('should connect to VARA TNC', function() {
@@ -115,9 +130,14 @@ describe('Server', function() {
     });
 
     it('should disconnect from VARA TNC', function() {
+        var closed = false;
         spyOn(mockSocket.prototype, 'destroy');
         server.listen({myCallSigns: ['N0CALL']});
+        server.on('close', function(err) {
+            closed = true;
+        });
         server.close();
+        expect(closed).toBe(true);
         expect(aSocket.destroy).toHaveBeenCalled();
     });
 
