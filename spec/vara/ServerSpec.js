@@ -3,37 +3,45 @@ const Net = require('net');
 const Stream = require('stream');
 const VARA = require('../../index.js');
 
+const logStream = new Stream();
 const logger = Bunyan.createLogger({
     name: 'ServerSpec',
     level: Bunyan.ERROR,
+    streams: [{
+        type: "raw",
+        stream: logStream,
+    }],
 });
+logStream.writable = true;
+logStream.write = function(item) {
+    console.log(`${item.level}: ${item.msg}`);
+}
 
 const realSocket = Net.Socket;
 var aSocket = null;
 
-function expectSocket_write(data) {
-    expect(aSocket._write(Buffer.from(data), 'buffer', jasmine.any(Function)));
-}
-
 class mockSocket extends Stream.Duplex {
-    constructor(options) {
+    constructor() {
         super({});
-        logger.debug(`new mockSocket(${options})`);
+        logger.debug(`new mockSocket`);
         spyOn(this, 'on');
         spyOn(this, 'pipe');
-        // spyOn(this, 'connect'); doesn't work
-        spyOn(this, '_write');
-        aSocket = this;
+        // spyOn(this, 'connect'); // doesn't work
+        // spyOn(this, '_write'); // doesn't work
+        aSocket = this; 
     }
     connect(options, callback) {
         logger.debug(`connect(%s, %s)`, options, typeof callback);
         if (callback) callback('not really an error');
     }
+    _destroy(err, callback) {
+        if (callback) callback(err);
+    }
     _read(size) {
         this.receiveBufferIsFull = false;
     }
     _write(data, encoding, callback) {
-        logger.debug(`_write(%s, %s)`, 'data', encoding, typeof callback);
+        logger.debug(`_write(%s, %s, %s)`, data.toString(), encoding, typeof callback);
         this.receiveBufferIsFull = this.push('OK\r');
         if (callback) callback();
     }
@@ -82,13 +90,11 @@ describe('Server', function() {
     });
 
     it('should connect to VARA TNC', function() {
+        spyOn(mockSocket.prototype, 'connect');
         server.listen({myCallSigns: ['N0CALL']});
         expect(aSocket.on).toHaveBeenCalled();
+        expect(aSocket.connect).toHaveBeenCalledTimes(1);
         expect(aSocket.pipe).toHaveBeenCalledTimes(1);
-        // expect(aSocket.connect).toHaveBeenCalledTimes(1); doesn't work
-        expectSocket_write('VERSION\r');
-        expectSocket_write('MYCALL N0CALL\r');
-        expectSocket_write('LISTEN ON\r');
     });
 
     it('should not listen twice', function() {
