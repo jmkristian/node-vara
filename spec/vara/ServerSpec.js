@@ -21,12 +21,13 @@ const realSocket = Net.Socket;
 var aSocket = null;
 
 class mockSocket extends Stream.Duplex {
-    constructor() {
+    constructor(options) {
         super({});
-        logger.debug(`new mockSocket`);
+        logger.debug('new mockSocket(%o)', options);
         spyOn(this, 'on');
         spyOn(this, 'pipe');
         // spyOn(this, 'connect'); // doesn't work
+        // spyOn(this, 'destroy'); // doesn't work
         // spyOn(this, '_write'); // doesn't work
         aSocket = this; 
     }
@@ -49,7 +50,7 @@ class mockSocket extends Stream.Duplex {
 
 describe('Server', function() {
 
-    let server
+    let server, serverOptions
 
     beforeAll(function() {
         Net.Socket = mockSocket;
@@ -60,11 +61,19 @@ describe('Server', function() {
     });
 
     beforeEach(function() {
-        server = new VARA.Server({logger: logger});
+        serverOptions = {
+            host: Math.floor(Math.random() * (1 << 20)).toString(36),
+            port: Math.floor(Math.random() * ((1 << 16) - 1)) + 1,
+            logger: logger,
+        };
+        server = new VARA.Server(serverOptions);
     });
 
     afterEach(function() {
-        server.close();
+        try {
+            server.close();
+        } catch(err) {
+        }
     });
 
     it('should not close when not listening', function() {
@@ -91,10 +100,25 @@ describe('Server', function() {
 
     it('should connect to VARA TNC', function() {
         spyOn(mockSocket.prototype, 'connect');
-        server.listen({myCallSigns: ['N0CALL']});
+        server.listen({
+            myCallSigns: ['N0CALL'],
+        });
         expect(aSocket.on).toHaveBeenCalled();
-        expect(aSocket.connect).toHaveBeenCalledTimes(1);
         expect(aSocket.pipe).toHaveBeenCalledTimes(1);
+        expect(aSocket.connect).toHaveBeenCalledWith(
+            jasmine.objectContaining({
+                host: serverOptions.host,
+                port: serverOptions.port,
+            }),
+            jasmine.any(Function)
+        );
+    });
+
+    it('should disconnect from VARA TNC', function() {
+        spyOn(mockSocket.prototype, 'destroy');
+        server.listen({myCallSigns: ['N0CALL']});
+        server.close();
+        expect(aSocket.destroy).toHaveBeenCalled();
     });
 
     it('should not listen twice', function() {
