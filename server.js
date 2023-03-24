@@ -340,7 +340,7 @@ class Server extends EventEmitter {
             that.toVARA(`MYCALL ${that.myCallSigns}`, 'OK');
             // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
             that.toVARA('LISTEN ON', 'OK');
-            that.emit('listening', {host: that.myCallSigns.split('/\s+/')});
+            that.emit('listening', {localAddress: that.myCallSigns.split('/\s+/')});
         });
     }
 
