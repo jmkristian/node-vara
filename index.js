@@ -6,4 +6,3 @@ const server = require('./server.js');
 exports.Server = server.Server;
 exports.HF = 'HF';
 exports.FM = 'FM';
-exports.toDataSummary = server.toDataSummary;
