@@ -6,6 +6,7 @@ const Stream = require('stream');
 
 const DefaultLogID = 'VARA';
 const KByte = 1 << 10;
+const ERR_INVALID_ARG_VALUE = 'ERR_INVALID_ARG_VALUE';
 
 const LogNothing = {
     child: function(){return LogNothing;},
@@ -51,11 +52,11 @@ function getDataSummary(data) {
 }
 
 /** Pipes data from a Readable stream to a fromVARA method. */
-class VARAReceiver extends Stream.Writable {
+class DataReceiver extends Stream.Writable {
 
     constructor(options, target) {
         super(); // The defaults are good.
-        if (!target) throw 'no target';
+        if (!target) throw newError('no target', ERR_INVALID_ARG_VALUE);;
         this.log = getLogger(options, this);
         this.target = target;
     }
@@ -63,16 +64,16 @@ class VARAReceiver extends Stream.Writable {
     _write(chunk, encoding, callback) {
         try {
             if (!Buffer.isBuffer(chunk)) {
-                throw `VARAReceiver._write chunk isn't a Buffer`;
-            } else {
-                if (this.log.trace()) {
-                    this.log.trace('< %s', getDataSummary(chunk));
-                }
-                this.target.fromVARA(chunk);
+                throw newError(`DataReceiver._write chunk isn't a Buffer`,
+                               ERR_INVALID_ARG_VALUE);
             }
+            if (this.log.trace()) {
+                this.log.trace('< %s', getDataSummary(chunk));
+            }
+            this.target.fromVARA(chunk);
             callback(null);
         } catch(err) {
-            this.log.error(err);
+            this.log.debug(err);
             callback(err);
         }
     }
@@ -83,18 +84,16 @@ class LineReceiver extends Stream.Writable {
 
     constructor(options, target) {
         super(); // The defaults are good.
-        if (!target) throw 'no target';
+        if (!target) throw newError('no target', ERR_INVALID_ARG_VALUE);;
         this.log = getLogger(options, this);
         this.target = target;
+        this.inputBuffer = '';
     }
 
     _write(chunk, encoding, callback) {
         try {
             if (this.log.trace()) {
                 this.log.trace('< %s', getDataSummary(chunk));
-            }
-            if (this.inputBuffer == null) {
-                this.inputBuffer = '';
             }
             this.inputBuffer += chunk.toString('utf-8');
             var CR;
@@ -105,7 +104,7 @@ class LineReceiver extends Stream.Writable {
             }
             callback(null);
         } catch(err) {
-            this.log.error(err);
+            this.log.debug(err);
             callback(err);
         }
     }
@@ -114,7 +113,7 @@ class LineReceiver extends Stream.Writable {
 /** Exchanges bytes between one local call sign and one remote call sign. */
 class Connection extends Stream.Duplex {
     /* It's tempting to simply provide the dataSocket to the application, but
-       this doesn't work. The dataSocket doesn't always emit close when you
+       that doesn't work. The dataSocket doesn't always emit close when you
        expect. And when the application calls connection.end(data), we must
        wait for VARA to report that it has transmitted all the data before
        closing the dataSocket. And it's not clear from the documentation
@@ -160,7 +159,7 @@ class Connection extends Stream.Duplex {
     }
 
     _read(size) {
-        this.receiveBufferIsFull = false;
+        this._pushable = true;
         // fromVARA calls this.push.
     }
 
@@ -190,12 +189,12 @@ class Connection extends Stream.Duplex {
         if (this.log.debug()) {
             this.log.debug('data< %s', getDataSummary(buffer));
         }
-        if (this.receiveBufferIsFull) {
-            this.emit('error',
-                      new Error('VARA receive buffer overflow: '
-                                + getDataSummary(buffer)));
+        if (this._pushable) {
+            this._pushable = this.push(buffer);
         } else {
-            this.receiveBufferIsFull = !this.push(buffer);
+            this.emit('error', new Error(
+                'VARA receive buffer overflow: ' + getDataSummary(buffer)
+            ));
         }
     }
 
@@ -221,7 +220,7 @@ class Server extends EventEmitter {
     listen(options, callback) {
         this.log.trace('listen(%o)', options);
         if (!(options && options.host && (!Array.isArray(options.host) || options.host.length > 0))) {
-            throw newError('no options.host', 'ERR_INVALID_ARG_VALUE');
+            throw newError('no options.host', ERR_INVALID_ARG_VALUE);
         }
         if (this.listening) {
             throw newError('Server is already listening.', 'ERR_SERVER_ALREADY_LISTEN');
@@ -412,8 +411,7 @@ class Server extends EventEmitter {
             delete this.dataReceiver;
         }
         this.connectDataSocket(); // if necessary
-        this.connection =
-            new Connection(this.options, this.dataSocket);
+        this.connection = new Connection(this.options, this.dataSocket);
         var that = this;
         ['end', 'close'].forEach(function(event) {
             that.connection.on(event, function(err) {
@@ -437,7 +435,7 @@ class Server extends EventEmitter {
         });
         this.connection.remoteAddress = parts[1];
         this.connection.localAddress = parts[2];
-        this.dataReceiver = new VARAReceiver(this.options, this.connection);
+        this.dataReceiver = new DataReceiver(this.options, this.connection);
         this.dataSocket.pipe(this.dataReceiver);
         this.isConnected = true;
         this.emit('connection', this.connection);
