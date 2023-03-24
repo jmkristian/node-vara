@@ -73,7 +73,7 @@ class DataReceiver extends Stream.Writable {
             this.target.fromVARA(chunk);
             callback(null);
         } catch(err) {
-            this.log.debug(err);
+            this.log.trace(err);
             callback(err);
         }
     }
@@ -104,7 +104,7 @@ class LineReceiver extends Stream.Writable {
             }
             callback(null);
         } catch(err) {
-            this.log.debug(err);
+            this.log.trace(err);
             callback(err);
         }
     }
@@ -331,14 +331,14 @@ class Server extends EventEmitter {
     }
 
     connectVARA() {
-        this.log.debug(`connectVARA`);
+        this.log.trace(`connectVARA`);
         if (this.socket) {
             this.socket.destroy();
         }
         this.socket = this.newSocket();
         const that = this;
         this.socket.on('error', function(err) {
-            that.log.debug('socket error %s', err || '');
+            that.log.trace(err, 'socket');
             that.emit('error', err);
             if (err &&
                 (err.code == 'ECONNREFUSED' ||
@@ -348,7 +348,7 @@ class Server extends EventEmitter {
         });
         // VARA might close the socket. The documentation doesn't say.
         this.socket.on('close', function(info) {
-            that.log.debug('socket close %s', info || '');
+            that.log.trace('socket close %s', info || '');
             if (that.listening) {
                 that.connectVARA();
             }
@@ -382,9 +382,10 @@ class Server extends EventEmitter {
             var that = this;
             ['error', 'timeout'].forEach(function(event) {
                 that.dataSocket.on(event, function onDataSocketEvent(info) {
-                    that.log.debug('dataSocket %s %s', event, info || '');
                     if (that.connection) {
                         that.connection.emit(event, info);
+                    } else {
+                        that.log.debug('dataSocket %s %s', event, info || '');
                     }
                 });
             });
@@ -442,7 +443,8 @@ class Server extends EventEmitter {
     }
 
     disconnectData(err) {
-        this.log.debug('disconnectData(%o)', err);
+        if (err) this.log.debug(err, 'disconnectData');
+        else this.log.debug('disconnectData', err);
         if (this.isConnected) {
             this.toVARA('DISCONNECT');
         }
