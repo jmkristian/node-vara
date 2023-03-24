@@ -1,6 +1,5 @@
 /** Utilities for exchanging data via VARA FM or VARA HF. */
 
-const Bunyan = require('bunyan');
 const EventEmitter = require('events');
 const Net = require('net');
 const Stream = require('stream');
@@ -8,10 +7,15 @@ const Stream = require('stream');
 const DefaultLogID = 'VARA';
 const KByte = 1 << 10;
 
-const LogNothing = Bunyan.createLogger({
-    name: 'VARA',
-    level: Bunyan.FATAL + 100,
-});
+const LogNothing = {
+    child: function(){return LogNothing;},
+    trace: function(){},
+    debug: function(){},
+    info: function(){},
+    warn: function(){},
+    error: function(){},
+    fatal: function(){},
+};
 
 function getLogger(options, that) {
     if (!(options && options.logger)) {
@@ -51,6 +55,7 @@ class VARAReceiver extends Stream.Writable {
 
     constructor(options, target) {
         super(); // The defaults are good.
+        if (!target) throw 'no target';
         this.log = getLogger(options, this);
         this.target = target;
     }
@@ -59,13 +64,44 @@ class VARAReceiver extends Stream.Writable {
         try {
             if (!Buffer.isBuffer(chunk)) {
                 throw `VARAReceiver._write chunk isn't a Buffer`;
-            } else if (!this.target) {
-                throw 'Lost received data ' + getDataSummary(chunk);
             } else {
                 if (this.log.trace()) {
                     this.log.trace('< %s', getDataSummary(chunk));
                 }
                 this.target.fromVARA(chunk);
+            }
+            callback(null);
+        } catch(err) {
+            this.log.error(err);
+            callback(err);
+        }
+    }
+}
+
+/** Pipes data from a Readable stream to a fromVARA method, line by line. */
+class LineReceiver extends Stream.Writable {
+
+    constructor(options, target) {
+        super(); // The defaults are good.
+        if (!target) throw 'no target';
+        this.log = getLogger(options, this);
+        this.target = target;
+    }
+
+    _write(chunk, encoding, callback) {
+        try {
+            if (this.log.trace()) {
+                this.log.trace('< %s', getDataSummary(chunk));
+            }
+            if (this.inputBuffer == null) {
+                this.inputBuffer = '';
+            }
+            this.inputBuffer += chunk.toString('utf-8');
+            var CR;
+            while (0 <= (CR = this.inputBuffer.indexOf('\r'))) {
+                var line = this.inputBuffer.substring(0, CR);
+                this.inputBuffer = this.inputBuffer.substring(CR + 1);
+                this.target.fromVARA(line);
             }
             callback(null);
         } catch(err) {
@@ -185,13 +221,10 @@ class Server extends EventEmitter {
     listen(options, callback) {
         this.log.trace('listen(%o)', options);
         if (!(options && options.host && (!Array.isArray(options.host) || options.host.length > 0))) {
-            throw new Error('no options.host');
+            throw newError('no options.host', 'ERR_INVALID_ARG_VALUE');
         }
         if (this.listening) {
             throw newError('Server is already listening.', 'ERR_SERVER_ALREADY_LISTEN');
-        }
-        if (options.port != null) {
-            this.log.warn("A VARA TNC doesn't have ports");
         }
         this.myCallSigns = Array.isArray(options.host) ? options.host.join(' ') : options.host + '';
         this.listening = true;
@@ -233,74 +266,69 @@ class Server extends EventEmitter {
         }
     }
 
-    fromVARA(buffer) {
-        if (this.inputBuffer == null) {
-            this.inputBuffer = '';
+    fromVARA(line) {
+        var parts = line.split(/\s+/);
+        var part0 = parts[0].toLowerCase();
+        switch(part0) {
+        case 'busy':
+        case 'iamalive':
+        case 'ptt':
+            // boring
+            this.log.trace(`< ${line}`);
+            break;
+        default:
+            this.log.debug(`< ${line}`);
         }
-        this.inputBuffer += buffer.toString('utf-8');
-        var CR;
-        while (0 <= (CR = this.inputBuffer.indexOf('\r'))) {
-            var line = this.inputBuffer.substring(0, CR);
-            this.inputBuffer = this.inputBuffer.substring(CR + 1);
-            var parts = line.split(/\s+/);
-            var part0 = parts[0].toLowerCase();
-            switch(part0) {
-            case 'busy':
-            case 'iamalive':
-            case 'ptt':
-                // boring
-                this.log.trace(`< ${line}`);
-                break;
-            default:
-                this.log.debug(`< ${line}`);
-            }
-            if (this.waitingFor && this.waitingFor == part0) {
-                this.waitingFor = null;
-                this.flushToVARA();
-            }
-            switch(part0) {
-            case '':
-                break;
-            case 'pending':
-                this.connectDataSocket();
-                break;
-            case 'cancelpending':
-                if (!this.isConnected) {
-                    this.disconnectData();
-                }
-                break;
-            case 'connected':
-                this.connectData(parts);
-                break;
-            case 'disconnected':
-                this.isConnected = false;
-                this.disconnectData(parts[1]);
-                break;
-            case 'buffer':
-                if (this.endingData &&
-                    (this.connection.bufferLength = parseInt(parts[1])) <= 0) {
-                    this.endingData = false;
-                    this.disconnectData();
-                    /* This isn't foolproof. If we send data simultaneous
-                       with receiving 'BUFFER 0' from VARA, we might call
-                       disconnectData prematurely and consequently VARA
-                       would lose the data.
-                    */
-                }
-                break;
-            case 'missing':
-                this.log.error(`< ${line}`);
-                this.close();
-                break;
-            case 'wrong':
-                this.log.warn(`< ${line}`);
-                this.waitingFor = null;
-                this.flushToVARA();
-                break;
-            default:
-                // We already logged it. No other action needed.
-            }
+        if (this.waitingFor && this.waitingFor == part0) {
+            this.waitingFor = null;
+            this.flushToVARA();
         }
+        switch(part0) {
+        case '':
+            break;
+        case 'pending':
+            this.connectDataSocket();
+            break;
+        case 'cancelpending':
+            if (!this.isConnected) {
+                this.disconnectData();
+            }
+            break;
+        case 'connected':
+            this.connectData(parts);
+            break;
+        case 'disconnected':
+            this.isConnected = false;
+            this.disconnectData(parts[1]);
+            break;
+        case 'buffer':
+            if (this.endingData &&
+                (this.connection.bufferLength = parseInt(parts[1])) <= 0) {
+                this.endingData = false;
+                this.disconnectData();
+                /* This isn't foolproof. If we send data simultaneous
+                   with receiving 'BUFFER 0' from VARA, we might call
+                   disconnectData prematurely and consequently VARA
+                   would lose the data.
+                */
+            }
+            break;
+        case 'missing':
+            this.log.error(`< ${line}`);
+            this.close();
+            break;
+        case 'wrong':
+            this.log.warn(`< ${line}`);
+            this.waitingFor = null;
+            this.flushToVARA();
+            break;
+        default:
+            // We already logged it. No other action needed.
+        }
+    }
+
+    newSocket() {
+        return (this.options.newSocket || function(){return new Net.Socket();})();
     }
 
     connectVARA() {
@@ -308,14 +336,14 @@ class Server extends EventEmitter {
         if (this.socket) {
             this.socket.destroy();
         }
-        this.socket = new Net.Socket();
-        var that = this;
+        this.socket = this.newSocket();
+        const that = this;
         this.socket.on('error', function(err) {
-            that.log.trace('socket %s', err || '');
+            that.log.debug('socket error %s', err || '');
             that.emit('error', err);
             if (err &&
-                (`${err}`.includes('ECONNREFUSED') ||
-                 `${err}`.includes('ETIMEDOUT'))) {
+                (err.code == 'ECONNREFUSED' ||
+                 err.code == 'ETIMEDOUT')) {
                 that.close();
             }
         });
@@ -331,23 +359,27 @@ class Server extends EventEmitter {
                 that.log.debug('socket %s %s', event, info || '');
             });
         });
-        this.socket.pipe(new VARAReceiver(this.options, this));
-        this.socket.connect(this.options, function(err) {
+        this.socket.pipe(new LineReceiver(this.options, this));
+        this.socket.connect({
+            host: this.options.host,
+            port: this.options.port,
+        }, function(err) {
             if (err) {
-                that.log.warn(err, `socket`);
+                that.emit('error', err);
+            } else {
+                that.toVARA('VERSION', 'VERSION');
+                that.toVARA(`MYCALL ${that.myCallSigns}`, 'OK');
+                // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
+                that.toVARA('LISTEN ON', 'OK');
+                that.emit('listening', {localAddress: that.myCallSigns.split('/\s+/')});
             }
-            that.toVARA('VERSION', 'VERSION');
-            that.toVARA(`MYCALL ${that.myCallSigns}`, 'OK');
-            // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
-            that.toVARA('LISTEN ON', 'OK');
-            that.emit('listening', {localAddress: that.myCallSigns.split('/\s+/')});
         });
     }
 
     connectDataSocket() {
         if (!this.dataSocket) {
             this.log.debug('connectDataSocket');
-            this.dataSocket = new Net.Socket();
+            this.dataSocket = this.newSocket();
             var that = this;
             ['error', 'timeout'].forEach(function(event) {
                 that.dataSocket.on(event, function onDataSocketEvent(info) {
@@ -373,6 +405,7 @@ class Server extends EventEmitter {
     }
 
     connectData(parts) {
+        this.log.debug('connectData(%o)', parts);
         if (this.dataSocket && this.dataReceiver) {
             // It appears we're re-using an old dataSocket.
             this.dataSocket.unpipe(this.dataReceiver);
@@ -411,6 +444,7 @@ class Server extends EventEmitter {
     }
 
     disconnectData(err) {
+        this.log.debug('disconnectData(%o)', err);
         if (this.isConnected) {
             this.toVARA('DISCONNECT');
         }
@@ -435,4 +469,6 @@ class Server extends EventEmitter {
 } // Server
 
 exports.Server = Server;
-exports.toDataSummary = getDataSummary;
+
+// The following are used in unit tests, but not exported from this package.
+exports.LineReceiver = LineReceiver;

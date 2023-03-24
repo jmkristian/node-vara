@@ -6,14 +6,14 @@
   "engines": {
     "node": ">=8.17.0"
   },
-  "dependencies": {
-    "bunyan": "^1.8.15"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "jasmine": "^4.6.0"
+    "bunyan": "^1.8.15",
+    "jasmine": "^4.6.0",
+    "sinon": "^15.0.2"
   },
   "scripts": {
-    "test": "jasmine"
+    "test": "node ./checknode.js && jasmine"
   },
   "repository": {
     "type": "git",
