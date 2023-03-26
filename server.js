@@ -213,6 +213,7 @@ class Server extends EventEmitter {
         if (!(options && options.port)) throw new Error('no options.port');
         this.log = getLogger(options, this);
         this.options = options;
+        this.listening = false;
         this.outputBuffer = [];
         if (onConnection) this.on('connection', onConnection);
     }
@@ -225,8 +226,8 @@ class Server extends EventEmitter {
         if (this.listening) {
             throw newError('Server is already listening.', 'ERR_SERVER_ALREADY_LISTEN');
         }
-        this.myCallSigns = Array.isArray(options.host) ? options.host.join(' ') : options.host + '';
         this.listening = true;
+        this.host = options.host;
         if (callback) {
             this.on('listening', callback);
         }
@@ -260,8 +261,9 @@ class Server extends EventEmitter {
             var line = this.outputBuffer.shift();
             var waitFor = this.outputBuffer.shift();
             this.log.debug(`> ${line}`);
-            this.socket.write(line + '\r');
+            this.lastRequest = line;
             this.waitingFor = waitFor && waitFor.toLowerCase();
+            this.socket.write(line + '\r');
         }
     }
 
@@ -269,6 +271,7 @@ class Server extends EventEmitter {
         var parts = line.split(/\s+/);
         var part0 = parts[0].toLowerCase();
         switch(part0) {
+        case '':
         case 'busy':
         case 'iamalive':
         case 'ptt':
@@ -277,10 +280,6 @@ class Server extends EventEmitter {
             break;
         default:
             this.log.debug(`< ${line}`);
-        }
-        if (this.waitingFor && this.waitingFor == part0) {
-            this.waitingFor = null;
-            this.flushToVARA();
         }
         switch(part0) {
         case '':
@@ -316,13 +315,35 @@ class Server extends EventEmitter {
             this.log.error(`< ${line}`);
             this.close();
             break;
+        case 'ok':
+            if (this.lastRequest == 'LISTEN ON') {
+                this.log.trace(`lastRequest ${this.lastRequest}`);
+                this.emit('listening', {
+                    localAddress: (!Array.isArray(this.host) || this.host.length > 1)
+                        ? this.host
+                        : this.host.length == 1 ? this.host[0]
+                        : undefined,
+                });
+            }
+            break;
         case 'wrong':
-            this.log.warn(`< ${line}`);
-            this.waitingFor = null;
+            if (this.waitingFor) {
+                this.emit('error', newError(`TNC responded "${line}"`
+                                            + ` (not "${this.waitingFor}")`
+                                            + ` in response to "${this.lastRequest}"`));
+            } else {
+                this.emit('error', newError(`TNC responded "${line}"`));
+            }
+            this.waitingFor = undefined;
             this.flushToVARA();
             break;
         default:
             // We already logged it. No other action needed.
+        }
+        if (this.waitingFor == part0) {
+            this.waitingFor = undefined;
+            this.lastRequest = undefined;
+            this.flushToVARA();
         }
     }
 
@@ -359,6 +380,9 @@ class Server extends EventEmitter {
             });
         });
         this.socket.pipe(new LineReceiver(this.options, this));
+        const myCallSigns = Array.isArray(this.host)
+              ? this.host.join(' ')
+              : this.host + '';
         this.socket.connect({
             host: this.options.host,
             port: this.options.port,
@@ -367,10 +391,9 @@ class Server extends EventEmitter {
                 that.emit('error', err);
             } else {
                 that.toVARA('VERSION', 'VERSION');
-                that.toVARA(`MYCALL ${that.myCallSigns}`, 'OK');
+                that.toVARA(`MYCALL ${myCallSigns}`, 'OK');
                 // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
                 that.toVARA('LISTEN ON', 'OK');
-                that.emit('listening', {localAddress: that.myCallSigns.split('/\s+/')});
             }
         });
     }

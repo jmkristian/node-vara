@@ -7,6 +7,7 @@ const util = require('util');
 
 const ECONNREFUSED = 'ECONNREFUSED';
 const ETIMEDOUT = 'ETIMEDOUT';
+const MockVersion = 'VERSION mock';
 
 const logStream = new Stream();
 const log = Bunyan.createLogger({
@@ -91,7 +92,7 @@ class mockSocket extends Stream.Duplex {
     pushMore() {
         while (this._pushable && this._read_buffer.length > 0) {
             const response = this._read_buffer.shift();
-            this.log.trace('push %s', response);
+            this.log.trace('push %s', JSON.stringify(response));
             this._pushable = this.push(response);
         }
     }
@@ -108,6 +109,21 @@ function happySocket(options, spec) {
     return new mockSocket(options, spec, function(request) {
         switch(request.toLowerCase()) {
         case 'bogus':
+            return 'WRONG';
+        case 'version':
+            return MockVersion;
+        default:
+            return 'OK';
+        }
+    });
+}
+
+function listenFails(options, spec) {
+    return new mockSocket(options, spec, function(request) {
+        switch(request.toLowerCase()) {
+        case 'version':
+            return MockVersion;
+        case 'listen on':
             return 'WRONG';
         default:
             return 'OK';
@@ -187,7 +203,7 @@ describe('mockSocket', function() {
         const requests = ['VERSION', 'BOGUS'];
         // Expect some responses:
         const expected = [
-            [exposePromise(), 'OK'],
+            [exposePromise(), MockVersion],
             [exposePromise(), 'WRONG'],
         ];
         const results = expected.map(e => e[0].promise);
@@ -388,6 +404,29 @@ describe('Server', function() {
             server.on('error', function(err) {
                 expect(err.code).toEqual(ETIMEDOUT);
                 resolve();
+            });
+            server.listen({host: 'N0CALL'});
+        });
+        return expectAsync(closed).toBeResolved();
+    });
+
+    it('should not listen if TNC refuses', function() {
+        const spec = this;
+        server.close();
+        server = new VARA.Server(Object.assign(
+            {}, serverOptions,
+            {newSocket: function(options) {
+                return listenFails(options, spec);
+            }}));
+        const closed = new Promise(function(resolve, reject) {
+            var resolved = false;
+            server.on('listening', function(err) {
+                log.debug('listening %s', err || '');
+                reject('listening');
+            });
+            server.on('error', function(err) {
+                log.debug(err);
+                if (!resolved) resolve(err);
             });
             server.listen({host: 'N0CALL'});
         });
