@@ -1,6 +1,7 @@
 const VARA = require('../../server.js');
 const Bunyan = require('bunyan');
 const Net = require('net');
+const Readline = require('readline');
 const sinon = require('sinon');
 const Stream = require('stream');
 const util = require('util');
@@ -35,13 +36,6 @@ function newError(message, code) {
     return err;
 }
 
-/** A LineReceiver, but with a distinct class name (for logging). */
-class stubReceiver extends VARA.LineReceiver {
-    constructor(options, target) {
-        super(options, target);
-    }
-}
-
 class mockSocket extends Stream.Duplex {
     constructor(options, spec, respond) {
         super({
@@ -55,7 +49,18 @@ class mockSocket extends Stream.Duplex {
         this.respond = respond;
         this._read_buffer = [];
         this._pushable = false;
-        this.receiver = new stubReceiver({logger: options && options.logger}, this);
+        this.receiver = new Stream.Readable({
+            read: function(count) {},
+        });
+        Readline.createInterface({
+            input: this.receiver,
+        }).on('line', function(line) {
+            try {
+                that.toReader(that.respond(line) + '\r');
+            } catch(err) {
+                that.emit('error', err);
+            }
+        });
         this.on('pipe', function(from) {
             that.log.debug('pipe from %s', from.constructor.name);
         });
@@ -63,13 +68,6 @@ class mockSocket extends Stream.Duplex {
             that.log.debug('unpipe from %s', from.constructor.name);
         });
         spec.theSocket = this;
-    }
-    fromVARA(line) {
-        try {
-            this.toReader(this.respond(line) + '\r');
-        } catch(err) {
-            this.emit('error', err);
-        }
     }
     connect(options, callback) {
         this.log.debug(`connect(%s, %s)`, options, typeof callback);
@@ -80,7 +78,8 @@ class mockSocket extends Stream.Duplex {
         if (callback) callback();
     }
     _write(data, encoding, callback) {
-        this.receiver.write(data, encoding, callback);
+        this.receiver.push(data, encoding);
+        callback();
     }
     _read(size) {
         this.log.trace(`_read(%d)`, size);
@@ -180,14 +179,15 @@ describe('mockSocket', function() {
         const spec = this;
         const request = exposePromise();
         const response = new Promise(function(resolve, reject) {
-            const receiver = new stubReceiver({logger: log}, new LineConsumer(function(actual) {
-                log.debug('received %s', actual);
-                expect(actual).toEqual('OK');
-                resolve();
-            }));
             socket = happySocket({logger: log}, spec);
             socket.connect(null, function() {
-                socket.pipe(receiver);
+                Readline.createInterface({
+                    input: socket,
+                }).on('line', function(actual) {
+                    log.debug('response %s', actual);
+                    expect(actual).toEqual('OK');
+                    resolve();
+                });
                 socket.write('LISTEN ON\r', null, function(err) {
                     if (err) request.reject(err);
                     else request.resolve();
@@ -207,16 +207,17 @@ describe('mockSocket', function() {
             [exposePromise(), 'WRONG'],
         ];
         const results = expected.map(e => e[0].promise);
-        var expectIndex = 0;
-        const receiver = new stubReceiver({logger: log}, new LineConsumer(function(actual) {
-            log.debug('response %s', actual);
-            const item = expected[expectIndex++];
-            expect(actual).toEqual(item[1]);
-            item[0].resolve();
-        }));
         socket = happySocket({logger: log}, spec);
+        var expectIndex = 0;
         socket.connect(null, function() {
-            socket.pipe(receiver);
+            Readline.createInterface({
+                input: socket,
+            }).on('line', function(actual) {
+                log.debug('response %s', actual);
+                const item = expected[expectIndex++];
+                expect(actual).toEqual(item[1]);
+                item[0].resolve();
+            });
             // Send the requests:
             var requestIndex = 0;
             new Stream.Readable({

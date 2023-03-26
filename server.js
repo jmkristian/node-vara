@@ -2,6 +2,7 @@
 
 const EventEmitter = require('events');
 const Net = require('net');
+const Readline = require('readline');
 const Stream = require('stream');
 
 const DefaultLogID = 'VARA';
@@ -56,7 +57,9 @@ class DataReceiver extends Stream.Writable {
 
     constructor(options, target) {
         super(); // The defaults are good.
-        if (!target) throw newError('no target', ERR_INVALID_ARG_VALUE);;
+        if (!target) {
+            this.log.warn(newError('no target', ERR_INVALID_ARG_VALUE));
+        }
         this.log = getLogger(options, this);
         this.target = target;
     }
@@ -73,38 +76,7 @@ class DataReceiver extends Stream.Writable {
             this.target.fromVARA(chunk);
             callback(null);
         } catch(err) {
-            this.log.trace(err);
-            callback(err);
-        }
-    }
-}
-
-/** Pipes data from a Readable stream to a fromVARA method, line by line. */
-class LineReceiver extends Stream.Writable {
-
-    constructor(options, target) {
-        super(); // The defaults are good.
-        if (!target) throw newError('no target', ERR_INVALID_ARG_VALUE);;
-        this.log = getLogger(options, this);
-        this.target = target;
-        this.inputBuffer = '';
-    }
-
-    _write(chunk, encoding, callback) {
-        try {
-            if (this.log.trace()) {
-                this.log.trace('< %s', getDataSummary(chunk));
-            }
-            this.inputBuffer += chunk.toString('utf-8');
-            var CR;
-            while (0 <= (CR = this.inputBuffer.indexOf('\r'))) {
-                var line = this.inputBuffer.substring(0, CR);
-                this.inputBuffer = this.inputBuffer.substring(CR + 1);
-                this.target.fromVARA(line);
-            }
-            callback(null);
-        } catch(err) {
-            this.log.trace(err);
+            this.log.warn(err);
             callback(err);
         }
     }
@@ -353,77 +325,94 @@ class Server extends EventEmitter {
 
     connectVARA() {
         this.log.trace(`connectVARA`);
-        if (this.socket) {
-            this.socket.destroy();
-        }
-        this.socket = this.newSocket();
-        const that = this;
-        this.socket.on('error', function(err) {
-            that.log.trace(err, 'socket');
-            that.emit('error', err);
-            if (err &&
-                (err.code == 'ECONNREFUSED' ||
-                 err.code == 'ETIMEDOUT')) {
-                that.close();
+        try {
+            if (this.socket) {
+                this.socket.destroy();
             }
-        });
-        // VARA might close the socket. The documentation doesn't say.
-        this.socket.on('close', function(info) {
-            that.log.trace('socket close %s', info || '');
-            if (that.listening) {
-                that.connectVARA();
-            }
-        });
-        ['timeout', 'end', 'finish'].forEach(function(event) {
-            that.socket.on(event, function(info) {
-                that.log.debug('socket %s %s', event, info || '');
-            });
-        });
-        this.socket.pipe(new LineReceiver(this.options, this));
-        const myCallSigns = Array.isArray(this.host)
-              ? this.host.join(' ')
-              : this.host + '';
-        this.socket.connect({
-            host: this.options.host,
-            port: this.options.port,
-        }, function(err) {
-            if (err) {
+            this.socket = this.newSocket();
+            const that = this;
+            this.socket.on('error', function(err) {
+                that.log.trace(err, 'socket');
                 that.emit('error', err);
-            } else {
-                that.toVARA('VERSION', 'VERSION');
-                that.toVARA(`MYCALL ${myCallSigns}`, 'OK');
-                // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
-                that.toVARA('LISTEN ON', 'OK');
-            }
-        });
+                if (err &&
+                    (err.code == 'ECONNREFUSED' ||
+                     err.code == 'ETIMEDOUT')) {
+                    that.close();
+                }
+            });
+            // VARA might close the socket. The documentation doesn't say.
+            this.socket.on('close', function(info) {
+                that.log.trace('socket close %s', info || '');
+                if (that.listening) {
+                    that.connectVARA();
+                }
+            });
+            ['timeout', 'end', 'finish'].forEach(function(event) {
+                that.socket.on(event, function(info) {
+                    that.log.debug('socket %s %s', event, info || '');
+                });
+            });
+            const reader = Readline.createInterface({
+                input: this.socket,
+            }).on('line', function(line) {
+                that.fromVARA(line);
+            });
+            const myCallSigns = Array.isArray(this.host)
+                  ? this.host.join(' ')
+                  : this.host + '';
+            this.socket.connect({
+                host: this.options.host,
+                port: this.options.port,
+            }, function(err) {
+                if (err) {
+                    that.emit('error', err);
+                } else {
+                    that.toVARA('VERSION', 'VERSION');
+                    that.toVARA(`MYCALL ${myCallSigns}`, 'OK');
+                    // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
+                    that.toVARA('LISTEN ON', 'OK');
+                }
+            });
+        } catch(err) {
+            this.emit('error', err);
+        }
     }
 
     connectDataSocket() {
-        if (!this.dataSocket) {
-            this.log.debug('connectDataSocket');
-            this.dataSocket = this.newSocket();
-            var that = this;
-            ['error', 'timeout'].forEach(function(event) {
-                that.dataSocket.on(event, function onDataSocketEvent(info) {
-                    if (that.connection) {
-                        that.connection.emit(event, info);
-                    } else {
-                        that.log.debug('dataSocket %s %s', event, info || '');
-                    }
+        const that = this;
+        const emitEvent = function(event, err) {
+            if (that.connection) {
+                that.connection.emit(event, info);
+            } else {
+                that.emit(event, info);
+            }
+        };
+        try {
+            if (!this.dataSocket) {
+                this.log.debug('connectDataSocket');
+                this.dataSocket = this.newSocket();
+                ['error', 'timeout'].forEach(function(event) {
+                    that.dataSocket.on(event, function onDataSocketEvent(info) {
+                        emitEvent(event, info);
+                    });
                 });
-            });
-            ['end', 'close'].forEach(function(event) {
-                that.dataSocket.on(event, function(err) {
-                    if (err) that.log.warn('dataSocket %s %s', event, err);
-                    else that.log.debug('dataSocket %s', event);
-                    that.disconnectData(err);
-                    delete that.dataSocket;
+                ['end', 'close'].forEach(function(event) {
+                    that.dataSocket.on(event, function(err) {
+                        if (err) that.log.warn('dataSocket %s %s', event, err);
+                        else that.log.debug('dataSocket %s', event);
+                        that.disconnectData(err);
+                        delete that.dataSocket;
+                    });
                 });
-            });
-            this.dataSocket.connect({
-                host: this.options.host,
-                port: this.options.dataPort,
-            });
+                this.dataSocket.connect({
+                    host: this.options.host,
+                    port: this.options.dataPort,
+                }, function onDataSocketConnect(err) {
+                    if (err) emitEvent('error', err);
+                });
+            }
+        } catch(err) {
+            emitEvent('error', err);
         }
     }
 
@@ -492,6 +481,3 @@ class Server extends EventEmitter {
 } // Server
 
 exports.Server = Server;
-
-// The following are used in unit tests, but not exported from this package.
-exports.LineReceiver = LineReceiver;
