@@ -400,6 +400,7 @@ class Server extends EventEmitter {
                     });
                 ['error', 'timeout'].forEach(function(event) {
                     that.dataSocket.on(event, function onDataSocketEvent(info) {
+                        that.log.trace('dataSocket %s %s', event, info || '');
                         emitEvent(event, info);
                     });
                 });
