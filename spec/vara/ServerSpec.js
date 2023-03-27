@@ -22,7 +22,7 @@ class happyNet extends MockNet.mockNet {
     }
 }
 
-class listenFails extends happyNet {
+class listenFails extends MockNet.mockNet {
     constructor(spec, options) {
         super(spec, options);
         this.respond = function(chunk, encoding) {
@@ -165,15 +165,14 @@ describe('Server', function() {
         };
         const connectSpy = sandbox.spy(MockNet.mockSocket.prototype, 'connect');
         const connected = new Promise(function(resolve, reject) {
-            server.listen({host: ['N0CALL']}, function() {
-                // Give the server some time to connect the socket.
-                setTimeout(function() {
-                    expect(connectSpy.calledOnce).toBeTruthy();
-                    expect(connectSpy.getCall(0).args[0]).toEqual(
-                        jasmine.objectContaining(expectOptions));
-                    resolve();
-                }, 100);
+            server.on('listening', function() {
+                expect(server.listening).toEqual(true);
+                expect(connectSpy.calledOnce).toBeTruthy();
+                expect(connectSpy.getCall(0).args[0]).toEqual(
+                    jasmine.objectContaining(expectOptions));
+                resolve();
             });
+            server.listen({host: ['N0CALL']});
         });
         return expectAsync(connected).toBeResolved();
     });
@@ -183,16 +182,15 @@ describe('Server', function() {
         const server = this.server;
         const destroySpy = sandbox.spy(MockNet.mockSocket.prototype, 'destroy');
         const closed = new Promise(function(resolve, reject) {
+            server.on('listening', function() {
+                expect(server.listening).toEqual(true);
+                server.close();
+            });
             server.on('close', function(err) {
                 expect(destroySpy.calledOnce).toBeTruthy();
                 resolve();
             });
-            server.listen({host: 'N0CALL'}, function() {
-                // Give the server some time to connect the socket.
-                setTimeout(function() {
-                    server.close();
-                }, 500);
-            });
+            server.listen({host: ['N0CALL']});
         });
         return expectAsync(closed).toBeResolved();
     });
@@ -204,7 +202,7 @@ describe('Server', function() {
             {}, this.serverOptions,
             {Net: new MockNet.noTNC(spec)}
         ));
-        const closed = new Promise(function(resolve, reject) {
+        const reported = new Promise(function(resolve, reject) {
             server.on('listening', function(err) {
                 reject('listening');
             });
@@ -214,7 +212,7 @@ describe('Server', function() {
             });
             server.listen({host: 'N0CALL'});
         });
-        return expectAsync(closed).toBeResolved();
+        return expectAsync(reported).toBeResolved();
     });
 
     it('should report no TNC host', function() {
@@ -224,7 +222,7 @@ describe('Server', function() {
             {}, this.serverOptions,
             {Net: new MockNet.noTNCHost(spec)}
         ));
-        const closed = new Promise(function(resolve, reject) {
+        const reported = new Promise(function(resolve, reject) {
             server.on('listening', function(err) {
                 reject('listening');
             });
@@ -235,7 +233,7 @@ describe('Server', function() {
             });
             server.listen({host: 'N0CALL'});
         });
-        return expectAsync(closed).toBeResolved();
+        return expectAsync(reported).toBeResolved();
     });
 
     it('should not listen if TNC refuses', function() {
@@ -245,7 +243,7 @@ describe('Server', function() {
             {}, this.serverOptions,
             {Net: new listenFails(spec)}
         ));
-        const closed = new Promise(function(resolve, reject) {
+        const reported = new Promise(function(resolve, reject) {
             var resolved = false;
             server.on('listening', function(err) {
                 log.debug('listening %s', err || '');
@@ -257,7 +255,7 @@ describe('Server', function() {
             });
             server.listen({host: 'N0CALL'});
         });
-        return expectAsync(closed).toBeResolved();
+        return expectAsync(reported).toBeResolved();
     });
 
 }); // Server
