@@ -212,7 +212,7 @@ class Server extends EventEmitter {
             if (callback) callback(new Error('Server is already closed'));
         } else {
             this.listening = false;
-            this.socket.destroy();
+            if (this.socket) this.socket.destroy();
             this.emit('close');
             if (callback) callback();
         }
@@ -319,8 +319,15 @@ class Server extends EventEmitter {
         }
     }
 
-    newSocket() {
-        return (this.options.newSocket || function(){return new Net.Socket();})();
+    _createConnection(connectOptions, onConnected) {
+        const options = Object.assign({host: '127.0.0.1'}, connectOptions);;
+        delete options.dataPort;
+        delete options.logger;
+        delete options.Net;
+        this.log.trace('%s.createConnection(%s)',
+                       this.options.Net ? 'options.Net' : 'Net',
+                       options);
+        return (this.options.Net || Net).createConnection(options, onConnected);
     }
 
     connectVARA() {
@@ -329,8 +336,24 @@ class Server extends EventEmitter {
             if (this.socket) {
                 this.socket.destroy();
             }
-            this.socket = this.newSocket();
             const that = this;
+            const myCallSigns = Array.isArray(this.host)
+                  ? this.host.join(' ')
+                  : this.host + '';
+            this.socket = this._createConnection(this.options, function onConnected(err) {
+                that.log.trace('socket connected %s', err || '');
+                const reader = Readline.createInterface({
+                    input: that.socket,
+                });
+                reader.on('line', function(line) {
+                    that.fromVARA(line);
+                });
+                reader.on('error', function(err) {});
+                that.toVARA('VERSION', 'VERSION');
+                that.toVARA(`MYCALL ${myCallSigns}`, 'OK');
+                // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
+                that.toVARA('LISTEN ON', 'OK');
+            });
             this.socket.on('error', function(err) {
                 that.log.trace(err, 'socket');
                 that.emit('error', err);
@@ -349,29 +372,8 @@ class Server extends EventEmitter {
             });
             ['timeout', 'end', 'finish'].forEach(function(event) {
                 that.socket.on(event, function(info) {
-                    that.log.debug('socket %s %s', event, info || '');
+                    that.log.debug('socket emitted %s %s', event, info || '');
                 });
-            });
-            const reader = Readline.createInterface({
-                input: this.socket,
-            }).on('line', function(line) {
-                that.fromVARA(line);
-            });
-            const myCallSigns = Array.isArray(this.host)
-                  ? this.host.join(' ')
-                  : this.host + '';
-            this.socket.connect({
-                host: this.options.host,
-                port: this.options.port,
-            }, function(err) {
-                if (err) {
-                    that.emit('error', err);
-                } else {
-                    that.toVARA('VERSION', 'VERSION');
-                    that.toVARA(`MYCALL ${myCallSigns}`, 'OK');
-                    // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
-                    that.toVARA('LISTEN ON', 'OK');
-                }
             });
         } catch(err) {
             this.emit('error', err);
@@ -390,7 +392,12 @@ class Server extends EventEmitter {
         try {
             if (!this.dataSocket) {
                 this.log.debug('connectDataSocket');
-                this.dataSocket = this.newSocket();
+                this.dataSocket = this._createConnection(
+                    Object.assign({}, this.options,
+                                  {port: this.options.dataPort || this.options.port + 1}),
+                    function onConnected(err) {
+                        that.log.trace('dataSocket connected %s', err || '');
+                    });
                 ['error', 'timeout'].forEach(function(event) {
                     that.dataSocket.on(event, function onDataSocketEvent(info) {
                         emitEvent(event, info);
@@ -403,12 +410,6 @@ class Server extends EventEmitter {
                         that.disconnectData(err);
                         delete that.dataSocket;
                     });
-                });
-                this.dataSocket.connect({
-                    host: this.options.host,
-                    port: this.options.dataPort,
-                }, function onDataSocketConnect(err) {
-                    if (err) emitEvent('error', err);
                 });
             }
         } catch(err) {

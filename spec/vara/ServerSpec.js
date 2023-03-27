@@ -1,158 +1,52 @@
 const VARA = require('../../server.js');
 const Bunyan = require('bunyan');
+const MockNet = require('../mockNet/mockNet.js');
 const Net = require('net');
 const Readline = require('readline');
 const sinon = require('sinon');
 const Stream = require('stream');
 const util = require('util');
 
-const ECONNREFUSED = 'ECONNREFUSED';
-const ETIMEDOUT = 'ETIMEDOUT';
-const MockVersion = 'VERSION mock';
+const ECONNREFUSED = MockNet.ECONNREFUSED;
+const ETIMEDOUT = MockNet.ETIMEDOUT;
+const exposePromise = MockNet.exposePromise;
+const log = MockNet.log;
+const newError = MockNet.newError;
 
-const logStream = new Stream();
-const log = Bunyan.createLogger({
-    name: 'ServerSpec',
-    level: Bunyan.INFO,
-    streams: [{
-        type: "raw",
-        stream: logStream,
-    }],
-});
-logStream.writable = true;
-logStream.write = function(item) {
-    var c = item['class'];
-    c = c ? c + ' ' : '';
-    console.log(`${item.level}: ${c}${item.msg}`);
-}
-const LogNothing = Bunyan.createLogger({
-    name: 'ServerSpec',
-    level: Bunyan.FATAL + 100,
-});
+const MockVersion = 'VERSION mock\r';
 
-function newError(message, code) {
-    const err = new Error(message);
-    if (code) err.code = code;
-    return err;
-}
-
-class mockSocket extends Stream.Duplex {
-    constructor(options, spec, respond) {
-        super({
-            readable: true, // default
-            writable: true, // default
-        });
-        const that = this;
-        this.log = (options ? (options.logger || LogNothing) : log)
-            .child({'class': 'mockSocket'});
-        this.log.debug('new(%o)', options);
-        this.respond = respond;
-        this._read_buffer = [];
-        this._pushable = false;
-        this.receiver = new Stream.Readable({
-            read: function(count) {},
-        });
-        Readline.createInterface({
-            input: this.receiver,
-        }).on('line', function(line) {
-            try {
-                that.toReader(that.respond(line) + '\r');
-            } catch(err) {
-                that.emit('error', err);
+class happyNet extends MockNet.mockNet {
+    constructor(spec, options) {
+        super(spec, options);
+        this.respond = function(chunk, encoding) {
+            const request = chunk.toString('binary');
+            switch(request.toLowerCase()) {
+            case 'bogus\r':
+                return 'WRONG\r';
+            case 'version\r':
+                return MockVersion;
+            default:
+                return 'OK\r';
             }
-        });
-        this.on('pipe', function(from) {
-            that.log.debug('pipe from %s', from.constructor.name);
-        });
-        this.on('unpipe', function(from) {
-            that.log.debug('unpipe from %s', from.constructor.name);
-        });
-        spec.theSocket = this;
-    }
-    connect(options, callback) {
-        this.log.debug(`connect(%s, %s)`, options, typeof callback);
-        if (callback) callback();
-    }
-    _destroy(err, callback) {
-        this.emit('close');
-        if (callback) callback();
-    }
-    _write(data, encoding, callback) {
-        this.receiver.push(data, encoding);
-        callback();
-    }
-    _read(size) {
-        this.log.trace(`_read(%d)`, size);
-        this._pushable = true;
-        setTimeout(function(that) {
-            that.pushMore();
-        }, 10, this);
-    }
-    pushMore() {
-        while (this._pushable && this._read_buffer.length > 0) {
-            const response = this._read_buffer.shift();
-            this.log.trace('push %s', JSON.stringify(response));
-            this._pushable = this.push(response);
-        }
-    }
-    toReader(response) {
-        this.log.trace('toReader %o', response);
-        if (response) {
-            this._read_buffer.push(response);
-            this.pushMore();
-        }
+        };
     }
 }
 
-function happySocket(options, spec) {
-    return new mockSocket(options, spec, function(request) {
-        switch(request.toLowerCase()) {
-        case 'bogus':
-            return 'WRONG';
-        case 'version':
-            return MockVersion;
-        default:
-            return 'OK';
-        }
-    });
-}
-
-function listenFails(options, spec) {
-    return new mockSocket(options, spec, function(request) {
-        switch(request.toLowerCase()) {
-        case 'version':
-            return MockVersion;
-        case 'listen on':
-            return 'WRONG';
-        default:
-            return 'OK';
-        }
-    });
-}
-
-function noTNC(options, spec) {
-    const socket = happySocket(options, spec);
-    socket.connect = function(that, options, callback) {
-        socket.emit('error', newError('noTNC', ECONNREFUSED));
-    };
-    return socket;
-}
-
-function noTNCHost(options, spec) {
-    const socket = happySocket(options, spec);
-    socket.connect = function(that, options, callback) {
-        socket.emit('error', newError('noTNCHost', ETIMEDOUT));
-    };
-    return socket;
-}
-
-function exposePromise() {
-    const result = {};
-    result.promise = new Promise(function(resolve, reject) {
-        result.resolve = resolve;
-        result.reject = reject;
-    });
-    return result;
+class listenFails extends happyNet {
+    constructor(spec, options) {
+        super(spec, options);
+        this.respond = function(chunk, encoding) {
+            const request = chunk.toString('binary');
+            switch(request.toLowerCase()) {
+            case 'version\r':
+                return MockVersion;
+            case 'listen on\r':
+                return 'WRONG\r';
+            default:
+                return 'OK\r';
+            }
+        };
+    }
 }
 
 class LineConsumer {
@@ -164,98 +58,23 @@ class LineConsumer {
     }
 }
 
-describe('mockSocket', function() {
-
-    let socket
-
-    beforeEach(function() {
-    });
-
-    afterEach(function() {
-        socket.destroy();
-    });
-
-    it('should pipe a response', function() {
-        const spec = this;
-        const request = exposePromise();
-        const response = new Promise(function(resolve, reject) {
-            socket = happySocket({logger: log}, spec);
-            socket.connect(null, function() {
-                Readline.createInterface({
-                    input: socket,
-                }).on('line', function(actual) {
-                    log.debug('response %s', actual);
-                    expect(actual).toEqual('OK');
-                    resolve();
-                });
-                socket.write('LISTEN ON\r', null, function(err) {
-                    if (err) request.reject(err);
-                    else request.resolve();
-                });
-            });
-        });
-        return expectAsync(Promise.all([request.promise, response])).toBeResolved();
-    });
-
-    it('should pipe 2 responses', function() {
-        const spec = this;
-        // Send some requests:
-        const requests = ['VERSION', 'BOGUS'];
-        // Expect some responses:
-        const expected = [
-            [exposePromise(), MockVersion],
-            [exposePromise(), 'WRONG'],
-        ];
-        const results = expected.map(e => e[0].promise);
-        socket = happySocket({logger: log}, spec);
-        var expectIndex = 0;
-        socket.connect(null, function() {
-            Readline.createInterface({
-                input: socket,
-            }).on('line', function(actual) {
-                log.debug('response %s', actual);
-                const item = expected[expectIndex++];
-                expect(actual).toEqual(item[1]);
-                item[0].resolve();
-            });
-            // Send the requests:
-            var requestIndex = 0;
-            new Stream.Readable({
-                read: function(size) {
-                    if (requestIndex < requests.length) {
-                        const request = requests[requestIndex++];
-                        log.debug('request %o', request);
-                        this.push(request + '\r');
-                    }
-                },
-            }).pipe(socket);
-        });
-        return expectAsync(Promise.all(results)).toBeResolved();
-    });
-
-}); // mockSocket
-
 describe('Server', function() {
 
     const sandbox = sinon.createSandbox();
-    let serverOptions, server, newSocket
+    let serverOptions, server
 
     beforeEach(function() {
         const that = this;
-        newSocket = function(options) {
-            return happySocket(options, that);
-        };
         serverOptions = {
             host: Math.floor(Math.random() * (1 << 20)).toString(36),
             port: Math.floor(Math.random() * ((1 << 16) - 1)) + 1,
-            newSocket: newSocket,
+            Net: new happyNet(),
             logger: log,
         };
         server = new VARA.Server(serverOptions);
     });
 
     afterEach(function() {
-        server.close();
         sandbox.restore();
     });
 
@@ -333,7 +152,7 @@ describe('Server', function() {
 
     it('should connect to TNC', function() {
         log.debug('Server should connect to TNC');
-        const connectSpy = sandbox.spy(mockSocket.prototype, 'connect');
+        const connectSpy = sandbox.spy(MockNet.mockSocket.prototype, 'connect');
         const connected = new Promise(function(resolve, reject) {
             server.listen({host: ['N0CALL']}, function() {
                 // Give the server some time to connect the socket.
@@ -353,7 +172,7 @@ describe('Server', function() {
 
     it('should disconnect from TNC', function() {
         log.debug('Server should disconnect from TNC');
-        const destroySpy = sandbox.spy(mockSocket.prototype, 'destroy');
+        const destroySpy = sandbox.spy(MockNet.mockSocket.prototype, 'destroy');
         const closed = new Promise(function(resolve, reject) {
             server.on('close', function(err) {
                 expect(destroySpy.calledOnce).toBeTruthy();
@@ -374,9 +193,8 @@ describe('Server', function() {
         const spec = this;
         server = new VARA.Server(Object.assign(
             {}, serverOptions,
-            {newSocket: function(options) {
-                return noTNC(options, spec);
-            }}));
+            {Net: new MockNet.noTNC(spec)}
+        ));
         const closed = new Promise(function(resolve, reject) {
             server.on('listening', function(err) {
                 reject('listening');
@@ -395,14 +213,14 @@ describe('Server', function() {
         const spec = this;
         server = new VARA.Server(Object.assign(
             {}, serverOptions,
-            {newSocket: function(options) {
-                return noTNCHost(options, spec);
-            }}));
+            {Net: new MockNet.noTNCHost(spec)}
+        ));
         const closed = new Promise(function(resolve, reject) {
             server.on('listening', function(err) {
                 reject('listening');
             });
             server.on('error', function(err) {
+                log.debug('error %o from server', err);
                 expect(err.code).toEqual(ETIMEDOUT);
                 resolve();
             });
@@ -413,12 +231,10 @@ describe('Server', function() {
 
     it('should not listen if TNC refuses', function() {
         const spec = this;
-        server.close();
         server = new VARA.Server(Object.assign(
             {}, serverOptions,
-            {newSocket: function(options) {
-                return listenFails(options, spec);
-            }}));
+            {Net: new listenFails(spec)}
+        ));
         const closed = new Promise(function(resolve, reject) {
             var resolved = false;
             server.on('listening', function(err) {
