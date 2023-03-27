@@ -291,7 +291,7 @@ class Server extends EventEmitter {
             if (this.lastRequest == 'LISTEN ON') {
                 this.log.trace(`lastRequest ${this.lastRequest}`);
                 this.emit('listening', {
-                    localAddress: (!Array.isArray(this.host) || this.host.length > 1)
+                    host: (!Array.isArray(this.host) || this.host.length > 1)
                         ? this.host
                         : this.host.length == 1 ? this.host[0]
                         : undefined,
