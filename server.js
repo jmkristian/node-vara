@@ -107,20 +107,20 @@ class Connection extends Stream.Duplex {
         this.bufferLength = 0;
         var that = this;
         this.on('end', function onEnd(err) {
-            that.ended = true;
+            that._ended = true;
         });
         this.on('close', function onClose(err) {
-            if (!that.ended) {
-                that.ended = true;
+            if (!that._ended) {
+                that._ended = true;
                 that.emit('end');
             }
-            that.closed = true;
+            that._closed = true;
         });
     }
 
     _write(data, encoding, callback) {
-        if (this.ended) {
-            callback();
+        if (this._ended) {
+            callback(newError('Connection is ended', 'ERR_STREAM_WRITE_AFTER_END'));
         } else {
             if (this.log.debug()) {
                 this.log.debug('data> %s', getDataSummary(data));
@@ -145,12 +145,12 @@ class Connection extends Stream.Duplex {
         // The documentation seems to say this.destroy() should emit
         // 'end' and 'close', but I find that doesn't always happen.
         // This works reliably:
-        if (!this.ended) {
-            this.ended = true;
+        if (!this._ended) {
+            this._ended = true;
             this.emit('end');
         }
-        if (!this.closed) {
-            this.closed = true;
+        if (!this._closed) {
+            this._closed = true;
             this.emit('close');
         }
         delete this.dataSocket;
